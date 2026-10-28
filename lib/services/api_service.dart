@@ -77,6 +77,10 @@ class ApiService {
     throw Exception('Failed to load printers: ${response.body}');
   }
 
+  static Future<List<dynamic>> getPrinters() async {
+    return await fetchPrinters();
+  }
+
   static Future<bool> createPrinter(String name, String ipAddress, int port) async {
     final response = await http.post(
       Uri.parse('${ApiConfig.baseUrl}/printers'),
@@ -89,6 +93,51 @@ class ApiService {
     );
     if (response.statusCode != 201 && response.statusCode != 200) {
       throw Exception(response.body);
+    }
+    return true;
+  }
+
+  static Future<bool> addPrinter(Map<String, dynamic> data) async {
+    return await createPrinter(data['name'], data['ip_address'], data['port'] ?? 9100);
+  }
+
+  static Future<bool> deletePrinter(int printerId) async {
+    final response = await http.delete(Uri.parse('${ApiConfig.baseUrl}/printers/$printerId'));
+    if (response.statusCode != 200) {
+      throw Exception(response.body);
+    }
+    return true;
+  }
+
+  static Future<bool> testPrinter(Map<String, dynamic> data) async {
+    final response = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/printers/test'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(data),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to test printer: ${response.body}');
+    }
+    return true;
+  }
+
+  // --- AJUSTES / PRINTER & KITCHEN SETTINGS ---
+  static Future<Map<String, dynamic>> fetchAjustes() async {
+    final response = await http.get(Uri.parse('${ApiConfig.baseUrl}/ajustes'));
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    }
+    throw Exception('Failed to load settings: ${response.body}');
+  }
+
+  static Future<bool> saveAjustes(Map<String, dynamic> settings) async {
+    final response = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/ajustes'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(settings),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to save settings: ${response.body}');
     }
     return true;
   }
@@ -133,6 +182,29 @@ class ApiService {
     throw Exception('Failed to load waiter performance');
   }
 
+  static Future<List<dynamic>> fetchTableItems(String tableNumber) async {
+    final response = await http.get(Uri.parse('${ApiConfig.baseUrl}/orders/table/$tableNumber/items'));
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    }
+    throw Exception('Failed to load table items');
+  }
+
+  static Future<List<dynamic>> fetchKdsOrders({String? stationName}) async {
+    final Uri uri = Uri.parse('${ApiConfig.baseUrl}/kds/orders').replace(
+      queryParameters: {
+        if (stationName != null && stationName.isNotEmpty) 'station': stationName,
+      },
+    );
+
+    final response = await http.get(uri);
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Failed to load KDS orders for station: $stationName');
+    }
+  }
+
   static Future<bool> checkoutTable({
     required int orderId,
     required String paymentMethod,
@@ -152,4 +224,14 @@ class ApiService {
     );
     return response.statusCode == 200;
   }
+
+  static Future<bool> updateOrderStatus(int orderId, String status) async {
+    final response = await http.put(
+      Uri.parse('${ApiConfig.baseUrl}/kds/orders/$orderId/status'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'status': status}),
+    );
+    return response.statusCode == 200;
+  }
 }
+

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
-import 'order_taking_screen.dart';
+import '../services/navigation.dart';
 
 class HomeScreen extends StatefulWidget {
   final String waiterName;
@@ -21,17 +21,142 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadActiveTables() async {
-    setState(() => _isLoading = true);
+    // Only show the loading spinner if we don't have table data yet
+    if (_activeTables.isEmpty) {
+      setState(() => _isLoading = true);
+    }
+
     try {
       final tables = await ApiService.fetchActiveTables();
-      setState(() {
-        // Filter tables assigned to this logged-in waiter (or show all active)
-        _activeTables = tables;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _activeTables = tables;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  void _showExistingTableSummary(Map<String, dynamic> table) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    List<dynamic> existingItems = [];
+    try {
+      existingItems = await ApiService.fetchTableItems(table['table_number']);
+    } catch (e) {
+      // Handle error if fetch fails
+    }
+
+    if (!mounted) return;
+    AppNavigation.pop(context); // Dismiss loading spinner
+
+    double total = 0.0;
+    for (var item in existingItems) {
+      final double price = double.tryParse(item['price'].toString()) ?? 0.0;
+      final int qty = int.tryParse(item['quantity'].toString()) ?? 1;
+      total += price * qty;
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                table['table_number'] ?? 'Table',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              Chip(
+                label: Text('${table['guest_count'] ?? 1} Guests'),
+                backgroundColor: Colors.blue.shade100,
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 380,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Current Ordered Items:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const Divider(),
+                SizedBox(
+                  height: 200,
+                  child: existingItems.isEmpty
+                      ? const Center(child: Text('No items found for this table.'))
+                      : ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: existingItems.length,
+                    itemBuilder: (context, index) {
+                      final item = existingItems[index];
+                      final double price = double.tryParse(item['price'].toString()) ?? 0.0;
+                      final int qty = item['quantity'] ?? 1;
+                      final String notes = item['notes'] ?? '';
+
+                      return ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(
+                          '${qty}x ${item['item_name']}',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: notes.isNotEmpty ? Text('Note: $notes', style: const TextStyle(color: Colors.orange)) : null,
+                        trailing: Text(
+                          '\$${(price * qty).toStringAsFixed(2)}',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const Divider(),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Current Total:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    Text(
+                      '\$${total.toStringAsFixed(2)}',
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            OutlinedButton(
+              onPressed: () => AppNavigation.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue.shade800,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () async {
+                AppNavigation.pop(context); // Close modal
+                await AppNavigation.goToOrderTaking(
+                  context,
+                  tableNumber: table['table_number'],
+                  guestCount: table['guest_count'] ?? 1,
+                  waiterName: widget.waiterName,
+                );
+                _loadActiveTables();
+              },
+              child: const Text('Add Items'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void _openTableDialog() {
@@ -57,7 +182,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       labelText: 'Insert Table Number',
                       hintText: 'e.g. 6',
                       border: const OutlineInputBorder(),
-                      errorText: errorMessage, // Displays "Table X is already being used"
+                      errorText: errorMessage,
                     ),
                     onChanged: (value) {
                       final String trimmed = value.trim();
@@ -66,12 +191,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         return;
                       }
 
-                      // Format input to match table naming format (e.g., "Table 1")
                       final String formattedInput = trimmed.toLowerCase().startsWith('table')
                           ? trimmed
                           : 'Table $trimmed';
 
-                      // Check if formattedInput matches any active table number
                       final bool isOccupied = _activeTables.any((t) {
                         final String activeNum = (t['table_number'] ?? '').toString().trim().toLowerCase();
                         return activeNum == formattedInput.toLowerCase();
@@ -110,7 +233,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: () => AppNavigation.pop(context),
                   child: const Text('Cancel'),
                 ),
                 ElevatedButton(
@@ -118,7 +241,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     backgroundColor: Colors.blue.shade800,
                     foregroundColor: Colors.white,
                   ),
-                  // Disable button if input is empty OR if an error message exists
                   onPressed: (errorMessage != null || tableNumController.text.trim().isEmpty)
                       ? null
                       : () async {
@@ -127,16 +249,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         ? inputTable
                         : 'Table $inputTable';
 
-                    Navigator.pop(context);
-                    await Navigator.push(
+                    AppNavigation.pop(context);
+                    await AppNavigation.goToOrderTaking(
                       context,
-                      MaterialPageRoute(
-                        builder: (context) => OrderTakingScreen(
-                          tableNumber: formattedTable,
-                          guestCount: guestCount,
-                          waiterName: widget.waiterName,
-                        ),
-                      ),
+                      tableNumber: formattedTable,
+                      guestCount: guestCount,
+                      waiterName: widget.waiterName,
                     );
                     _loadActiveTables();
                   },
@@ -173,7 +291,6 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Open Table Button Row
               Center(
                 child: InkWell(
                   onTap: _openTableDialog,
@@ -202,11 +319,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
-
               const SizedBox(height: 32),
               const Text('My Active Tables', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 12),
-
               _isLoading
                   ? const Center(child: CircularProgressIndicator())
                   : _activeTables.isEmpty
@@ -238,19 +353,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(16),
-                      onTap: () async {
-                        await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => OrderTakingScreen(
-                              tableNumber: table['table_number'],
-                              guestCount: table['guest_count'] ?? 1,
-                              waiterName: widget.waiterName,
-                            ),
-                          ),
-                        );
-                        _loadActiveTables();
-                      },
+                      onTap: () => _showExistingTableSummary(table),
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Column(

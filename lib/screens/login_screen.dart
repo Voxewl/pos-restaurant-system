@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../config/api_config.dart';
-import 'home_screen.dart';
+import '../services/navigation.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -33,12 +33,8 @@ class _LoginScreenState extends State<LoginScreen> {
         final String waiterName = data['waiter']['name'];
 
         if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (context) => HomeScreen(waiterName: waiterName),
-            ),
-          );
+          // Centralized Navigation Call
+          AppNavigation.goToHome(context, waiterName: waiterName);
         }
       } else {
         if (mounted) {
