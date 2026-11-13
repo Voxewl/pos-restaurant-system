@@ -14,11 +14,14 @@ class _DesktopMenuManagementViewState extends State<DesktopMenuManagementView> {
   List<dynamic> _categories = [];
   List<dynamic> _menuItems = [];
 
+  // Category Controllers
   final TextEditingController _catNameCtrl = TextEditingController();
   int? _selectedPrinterForCat;
 
+  // Menu Item Controllers
   final TextEditingController _itemNameCtrl = TextEditingController();
   final TextEditingController _itemPriceCtrl = TextEditingController();
+  final TextEditingController _itemIngredientsCtrl = TextEditingController();
   int? _selectedCatForItem;
 
   @override
@@ -81,6 +84,7 @@ class _DesktopMenuManagementViewState extends State<DesktopMenuManagementView> {
   Future<void> _addMenuItem() async {
     final String name = _itemNameCtrl.text.trim();
     final double price = double.tryParse(_itemPriceCtrl.text.trim()) ?? 0.0;
+    final String ingredients = _itemIngredientsCtrl.text.trim();
 
     if (name.isEmpty || price <= 0 || _selectedCatForItem == null) {
       _showSnackBar('Please fill in Item Name, Price, and select a Category', isError: true);
@@ -88,10 +92,17 @@ class _DesktopMenuManagementViewState extends State<DesktopMenuManagementView> {
     }
 
     try {
-      final success = await ApiService.createMenuItem(name, price, _selectedCatForItem!);
+      // Pass ingredients to the API service
+      final success = await ApiService.createMenuItem(
+          name,
+          price,
+          _selectedCatForItem!,
+          description: ingredients // using description as ingredients mapping based on your api_service
+      );
       if (success) {
         _itemNameCtrl.clear();
         _itemPriceCtrl.clear();
+        _itemIngredientsCtrl.clear();
         setState(() => _selectedCatForItem = null);
         _showSnackBar('Menu Item "$name" added!');
         _loadMenuData();
@@ -111,6 +122,84 @@ class _DesktopMenuManagementViewState extends State<DesktopMenuManagementView> {
     } catch (e) {
       _showSnackBar('Failed to delete menu item: $e', isError: true);
     }
+  }
+
+  // --- EDIT MENU ITEM DIALOG ---
+  void _showEditItemDialog(Map<String, dynamic> item) {
+    final nameCtrl = TextEditingController(text: item['item_name'] ?? item['name']);
+    final priceCtrl = TextEditingController(text: item['price'].toString());
+    final ingredientsCtrl = TextEditingController(text: item['ingredients'] ?? '');
+    int? selectedCategoryId = item['category_id'];
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit Menu Item'),
+        content: SizedBox(
+          width: 400,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: 'Item Name', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: priceCtrl,
+                decoration: const InputDecoration(labelText: 'Price (\$)', border: OutlineInputBorder()),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<int>(
+                value: selectedCategoryId,
+                decoration: const InputDecoration(labelText: 'Category', border: OutlineInputBorder()),
+                items: _categories.map((c) => DropdownMenuItem<int>(
+                  value: c['id'] ?? c['category_id'],
+                  child: Text(c['name'] ?? c['category_name']),
+                )).toList(),
+                onChanged: (val) => selectedCategoryId = val,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ingredientsCtrl,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                    labelText: 'Ingredients / Recipe (e.g. 200g Beef, Cheddar, Bun)',
+                    border: OutlineInputBorder()
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade800, foregroundColor: Colors.white),
+            onPressed: () async {
+              if (nameCtrl.text.isEmpty || priceCtrl.text.isEmpty || selectedCategoryId == null) return;
+
+              try {
+                final int itemId = item['item_id'] ?? item['id'];
+                await ApiService.updateMenuItem(
+                  itemId,
+                  nameCtrl.text,
+                  double.parse(priceCtrl.text),
+                  selectedCategoryId!,
+                  ingredients: ingredientsCtrl.text,
+                );
+                if (mounted) Navigator.pop(ctx);
+                _loadMenuData(); // Refresh table to show new data
+                _showSnackBar('Item updated successfully!');
+              } catch (e) {
+                _showSnackBar('Error updating item: $e', isError: true);
+              }
+            },
+            child: const Text('Save Changes'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showSnackBar(String text, {bool isError = false}) {
@@ -217,6 +306,12 @@ class _DesktopMenuManagementViewState extends State<DesktopMenuManagementView> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 12),
+                  // New Ingredients Field on Create
+                  TextField(
+                    controller: _itemIngredientsCtrl,
+                    decoration: const InputDecoration(labelText: 'Ingredients (Optional)', hintText: 'e.g. Bread, Garlic, Butter', border: OutlineInputBorder()),
+                  ),
                   const SizedBox(height: 16),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade800, foregroundColor: Colors.white),
@@ -249,10 +344,11 @@ class _DesktopMenuManagementViewState extends State<DesktopMenuManagementView> {
                     DataCell(Text(cat['name'] ?? cat['category_name'] ?? '')),
                     DataCell(Text(cat['printer_name'] ?? 'Kitchen Printer', style: const TextStyle(color: Colors.blue))),
                     DataCell(
-                      ElevatedButton(
+                      ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
                         onPressed: () => _deleteCategory(catId),
-                        child: const Text('Delete Category'),
+                        icon: const Icon(Icons.delete, size: 16),
+                        label: const Text('Delete'),
                       ),
                     ),
                   ]);
@@ -282,15 +378,27 @@ class _DesktopMenuManagementViewState extends State<DesktopMenuManagementView> {
                   final double price = double.parse((item['price'] ?? 0.0).toString());
                   return DataRow(cells: [
                     DataCell(Text('$itemId')),
-                    DataCell(Text(item['item_name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold))),
+                    DataCell(Text(item['item_name'] ?? item['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold))),
                     DataCell(Text('\$${price.toStringAsFixed(2)}')),
                     DataCell(Text(item['category_name'] ?? '')),
                     DataCell(Text(item['printer_name'] ?? 'Kitchen Printer', style: const TextStyle(color: Colors.blue))),
                     DataCell(
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-                        onPressed: () => _deleteMenuItem(itemId),
-                        child: const Text('Delete Item'),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextButton.icon(
+                            onPressed: () => _showEditItemDialog(item),
+                            icon: const Icon(Icons.edit, size: 18, color: Colors.blue),
+                            label: const Text('Edit', style: TextStyle(color: Colors.blue)),
+                          ),
+                          const SizedBox(width: 8),
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                            onPressed: () => _deleteMenuItem(itemId),
+                            icon: const Icon(Icons.delete, size: 16),
+                            label: const Text('Delete'),
+                          ),
+                        ],
                       ),
                     ),
                   ]);

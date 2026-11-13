@@ -5,7 +5,7 @@ import '../models/order_item.dart';
 
 class ApiService {
   // --- MENU & CATEGORIES ---
-  static Future<List<dynamic>> fetchMenu() async {
+  static Future fetchMenu() async {
     final response = await http.get(Uri.parse(ApiConfig.menuUrl));
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
@@ -13,7 +13,7 @@ class ApiService {
     throw Exception('Failed to load menu: ${response.body}');
   }
 
-  static Future<List<dynamic>> fetchCategories() async {
+  static Future fetchCategories() async {
     final response = await http.get(Uri.parse('${ApiConfig.baseUrl}/categories'));
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
@@ -60,6 +60,24 @@ class ApiService {
     return true;
   }
 
+  static Future<bool> updateMenuItem(int itemId, String name, double price, int categoryId, {String ingredients = ''}) async {
+    final response = await http.put(
+      Uri.parse('${ApiConfig.baseUrl}/menu/$itemId'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'name': name,
+        'price': price,
+        'category_id': categoryId,
+        'ingredients': ingredients,
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception(response.body);
+    }
+    return true;
+  }
+
   static Future<bool> deleteMenuItem(int itemId) async {
     final response = await http.delete(Uri.parse('${ApiConfig.baseUrl}/menu/$itemId'));
     if (response.statusCode != 200) {
@@ -69,7 +87,7 @@ class ApiService {
   }
 
   // --- THERMAL PRINTERS ---
-  static Future<List<dynamic>> fetchPrinters() async {
+  static Future fetchPrinters() async {
     final response = await http.get(Uri.parse('${ApiConfig.baseUrl}/printers'));
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
@@ -77,7 +95,7 @@ class ApiService {
     throw Exception('Failed to load printers: ${response.body}');
   }
 
-  static Future<List<dynamic>> getPrinters() async {
+  static Future getPrinters() async {
     return await fetchPrinters();
   }
 
@@ -97,7 +115,7 @@ class ApiService {
     return true;
   }
 
-  static Future<bool> addPrinter(Map<String, dynamic> data) async {
+  static Future<bool> addPrinter(Map data) async {
     return await createPrinter(data['name'], data['ip_address'], data['port'] ?? 9100);
   }
 
@@ -109,7 +127,7 @@ class ApiService {
     return true;
   }
 
-  static Future<bool> testPrinter(Map<String, dynamic> data) async {
+  static Future<bool> testPrinter(Map data) async {
     final response = await http.post(
       Uri.parse('${ApiConfig.baseUrl}/printers/test'),
       headers: {'Content-Type': 'application/json'},
@@ -122,7 +140,7 @@ class ApiService {
   }
 
   // --- AJUSTES / PRINTER & KITCHEN SETTINGS ---
-  static Future<Map<String, dynamic>> fetchAjustes() async {
+  static Future fetchAjustes() async {
     final response = await http.get(Uri.parse('${ApiConfig.baseUrl}/ajustes'));
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
@@ -130,7 +148,7 @@ class ApiService {
     throw Exception('Failed to load settings: ${response.body}');
   }
 
-  static Future<bool> saveAjustes(Map<String, dynamic> settings) async {
+  static Future<bool> saveAjustes(Map settings) async {
     final response = await http.post(
       Uri.parse('${ApiConfig.baseUrl}/ajustes'),
       headers: {'Content-Type': 'application/json'},
@@ -166,7 +184,7 @@ class ApiService {
     throw Exception('Failed to submit order');
   }
 
-  static Future<List<dynamic>> fetchActiveTables() async {
+  static Future fetchActiveTables() async {
     final response = await http.get(Uri.parse('${ApiConfig.baseUrl}/orders/active'));
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
@@ -174,15 +192,36 @@ class ApiService {
     throw Exception('Failed to load active tables');
   }
 
-  static Future<List<dynamic>> fetchWaiterPerformance() async {
-    final response = await http.get(Uri.parse('${ApiConfig.baseUrl}/reports/waiters'));
+  // --- WAITER SALES & PERFORMANCE REPORTS ---
+  static Future fetchWaiterPerformance() async {
+    return await fetchWaiterReports();
+  }
+
+  static Future fetchWaiterReports({String period = 'day', String? customDate}) async {
+    String url = '${ApiConfig.baseUrl}/reports/waiters?period=$period';
+    if (period == 'custom' && customDate != null && customDate.isNotEmpty) {
+      url += '&date=$customDate';
+    }
+    final response = await http.get(Uri.parse(url));
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
     }
-    throw Exception('Failed to load waiter performance');
+    throw Exception('Failed to load waiter reports');
   }
 
-  static Future<List<dynamic>> fetchTableItems(String tableNumber) async {
+  static Future fetchWaiterDetails(String waiterName, {String period = 'day', String? customDate}) async {
+    String url = '${ApiConfig.baseUrl}/reports/waiters/${Uri.encodeComponent(waiterName)}/details?period=$period';
+    if (period == 'custom' && customDate != null && customDate.isNotEmpty) {
+      url += '&date=$customDate';
+    }
+    final response = await http.get(Uri.parse(url));
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    }
+    throw Exception('Failed to load waiter details');
+  }
+
+  static Future fetchTableItems(String tableNumber) async {
     final response = await http.get(Uri.parse('${ApiConfig.baseUrl}/orders/table/$tableNumber/items'));
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
@@ -190,7 +229,7 @@ class ApiService {
     throw Exception('Failed to load table items');
   }
 
-  static Future<List<dynamic>> fetchKdsOrders({String? stationName}) async {
+  static Future fetchKdsOrders({String? stationName}) async {
     final Uri uri = Uri.parse('${ApiConfig.baseUrl}/kds/orders').replace(
       queryParameters: {
         if (stationName != null && stationName.isNotEmpty) 'station': stationName,
@@ -225,6 +264,18 @@ class ApiService {
     return response.statusCode == 200;
   }
 
+  static Future<bool> completeKdsTicket(int orderId) async {
+    try {
+      final response = await http.put(
+        Uri.parse('${ApiConfig.baseUrl}/kds/orders/$orderId/complete-items'),
+        headers: {'Content-Type': 'application/json'},
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
+  }
+
   static Future<bool> updateOrderStatus(int orderId, String status) async {
     final response = await http.put(
       Uri.parse('${ApiConfig.baseUrl}/kds/orders/$orderId/status'),
@@ -233,5 +284,45 @@ class ApiService {
     );
     return response.statusCode == 200;
   }
-}
 
+// --- INVENTORY MANAGEMENT ---
+  static Future<List<dynamic>> fetchUnits() async {
+    final response = await http.get(Uri.parse('${ApiConfig.baseUrl}/units'));
+    if (response.statusCode == 200) return jsonDecode(response.body);
+    throw Exception('Failed to load units');
+  }
+
+  static Future<List<dynamic>> fetchInventory() async {
+    final response = await http.get(Uri.parse('${ApiConfig.baseUrl}/inventory'));
+    if (response.statusCode == 200) return jsonDecode(response.body);
+    throw Exception('Failed to load inventory');
+  }
+
+  static Future<bool> createInventoryItem(String name, int unitId, double initialStock, double minAlert) async {
+    final response = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/inventory'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'name': name,
+        'unit_id': unitId,
+        'current_stock': initialStock,
+        'min_stock_alert': minAlert,
+      }),
+    );
+    return response.statusCode == 201 || response.statusCode == 200;
+  }
+
+  static Future<bool> updateInventoryStock(int id, double newStock) async {
+    final response = await http.put(
+      Uri.parse('${ApiConfig.baseUrl}/inventory/$id/stock'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'current_stock': newStock}),
+    );
+    return response.statusCode == 200;
+  }
+
+  static Future<bool> deleteInventoryItem(int id) async {
+    final response = await http.delete(Uri.parse('${ApiConfig.baseUrl}/inventory/$id'));
+    return response.statusCode == 200;
+  }
+}

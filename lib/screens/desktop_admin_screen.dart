@@ -3,6 +3,7 @@ import 'desktop_active_tables_view.dart';
 import 'desktop_waiter_sales_view.dart';
 import 'desktop_printer_setup_view.dart';
 import 'desktop_menu_management_view.dart';
+import 'desktop_inventory_view.dart';
 
 class DesktopAdminScreen extends StatefulWidget {
   const DesktopAdminScreen({super.key});
@@ -56,6 +57,11 @@ class _DesktopAdminScreenState extends State<DesktopAdminScreen> {
                 selectedIcon: Icon(Icons.restaurant_menu),
                 label: Text('Menu & Categories'),
               ),
+              NavigationRailDestination(
+                icon: Icon(Icons.restaurant_menu_outlined),
+                selectedIcon: Icon(Icons.restaurant_menu),
+                label: Text('Inventory'),
+              ),
             ],
           ),
 
@@ -95,6 +101,7 @@ class _DesktopAdminScreenState extends State<DesktopAdminScreen> {
       case 1: return 'Waiter Sales & Performance';
       case 2: return 'Thermal Printers & Kitchen Settings';
       case 3: return 'Menu & Category Management';
+      case 4: return 'Inventory';
       default: return 'POS Admin';
     }
   }
@@ -109,6 +116,8 @@ class _DesktopAdminScreenState extends State<DesktopAdminScreen> {
         return const DesktopPrinterSetupView();
       case 3:
         return const DesktopMenuManagementView();
+      case 4:
+        return const DesktopInventoryView();
       default:
         return const SizedBox.shrink();
     }
