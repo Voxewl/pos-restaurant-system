@@ -4,6 +4,17 @@ import '../config/api_config.dart';
 import '../models/order_item.dart';
 
 class ApiService {
+  // Helper to extract backend error messages cleanly
+  static String _extractError(http.Response response, String fallback) {
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map && decoded['error'] != null) {
+        return decoded['error'].toString();
+      }
+    } catch (_) {}
+    return fallback;
+  }
+
   // --- MENU & CATEGORIES ---
   static Future fetchMenu() async {
     final response = await http.get(Uri.parse(ApiConfig.menuUrl));
@@ -28,7 +39,7 @@ class ApiService {
       body: jsonEncode({'name': name, 'printer_id': printerId}),
     );
     if (response.statusCode != 201 && response.statusCode != 200) {
-      throw Exception(response.body);
+      throw Exception(_extractError(response, 'Failed to create category'));
     }
     return true;
   }
@@ -36,7 +47,7 @@ class ApiService {
   static Future<bool> deleteCategory(int categoryId) async {
     final response = await http.delete(Uri.parse('${ApiConfig.baseUrl}/categories/$categoryId'));
     if (response.statusCode != 200) {
-      throw Exception(response.body);
+      throw Exception(_extractError(response, 'Failed to delete category'));
     }
     return true;
   }
@@ -50,12 +61,13 @@ class ApiService {
         'name': name,
         'price': price,
         'category_id': categoryId,
+        'ingredients': description,
         'description': description,
       }),
     );
 
     if (response.statusCode != 201 && response.statusCode != 200) {
-      throw Exception(response.body);
+      throw Exception(_extractError(response, 'Failed to create menu item'));
     }
     return true;
   }
@@ -73,7 +85,7 @@ class ApiService {
     );
 
     if (response.statusCode != 200) {
-      throw Exception(response.body);
+      throw Exception(_extractError(response, 'Failed to update menu item'));
     }
     return true;
   }
@@ -81,7 +93,7 @@ class ApiService {
   static Future<bool> deleteMenuItem(int itemId) async {
     final response = await http.delete(Uri.parse('${ApiConfig.baseUrl}/menu/$itemId'));
     if (response.statusCode != 200) {
-      throw Exception(response.body);
+      throw Exception(_extractError(response, 'Failed to delete menu item'));
     }
     return true;
   }
@@ -110,7 +122,7 @@ class ApiService {
       }),
     );
     if (response.statusCode != 201 && response.statusCode != 200) {
-      throw Exception(response.body);
+      throw Exception(_extractError(response, 'Failed to create printer'));
     }
     return true;
   }
@@ -122,7 +134,7 @@ class ApiService {
   static Future<bool> deletePrinter(int printerId) async {
     final response = await http.delete(Uri.parse('${ApiConfig.baseUrl}/printers/$printerId'));
     if (response.statusCode != 200) {
-      throw Exception(response.body);
+      throw Exception(_extractError(response, 'Failed to delete printer'));
     }
     return true;
   }
@@ -134,7 +146,7 @@ class ApiService {
       body: jsonEncode(data),
     );
     if (response.statusCode != 200) {
-      throw Exception('Failed to test printer: ${response.body}');
+      throw Exception(_extractError(response, 'Failed to test printer'));
     }
     return true;
   }
@@ -155,7 +167,7 @@ class ApiService {
       body: jsonEncode(settings),
     );
     if (response.statusCode != 200) {
-      throw Exception('Failed to save settings: ${response.body}');
+      throw Exception(_extractError(response, 'Failed to save settings'));
     }
     return true;
   }
@@ -181,7 +193,7 @@ class ApiService {
       final data = jsonDecode(response.body);
       return data['stationsNotified'] ?? 1;
     }
-    throw Exception('Failed to submit order');
+    throw Exception(_extractError(response, 'Failed to submit order'));
   }
 
   static Future fetchActiveTables() async {
@@ -285,7 +297,7 @@ class ApiService {
     return response.statusCode == 200;
   }
 
-// --- INVENTORY MANAGEMENT ---
+  // --- INVENTORY MANAGEMENT ---
   static Future<List<dynamic>> fetchUnits() async {
     final response = await http.get(Uri.parse('${ApiConfig.baseUrl}/units'));
     if (response.statusCode == 200) return jsonDecode(response.body);
@@ -309,20 +321,76 @@ class ApiService {
         'min_stock_alert': minAlert,
       }),
     );
-    return response.statusCode == 201 || response.statusCode == 200;
+    if (response.statusCode != 201 && response.statusCode != 200) {
+      throw Exception(_extractError(response, 'Failed to create inventory item'));
+    }
+    return true;
   }
 
-  static Future<bool> updateInventoryStock(int id, double newStock) async {
+  static Future<bool> updateInventoryStock(
+      int id, {
+        required String mode, // 'add' or 'set'
+        required double amount,
+        String notes = '',
+        double? minStockAlert,
+      }) async {
     final response = await http.put(
       Uri.parse('${ApiConfig.baseUrl}/inventory/$id/stock'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'current_stock': newStock}),
+      body: jsonEncode({
+        'mode': mode,
+        'amount': amount,
+        'notes': notes,
+        if (minStockAlert != null) 'min_stock_alert': minStockAlert,
+      }),
     );
-    return response.statusCode == 200;
+    if (response.statusCode != 200) {
+      throw Exception(_extractError(response, 'Failed to update inventory stock'));
+    }
+    return true;
+  }
+
+  static Future<List<dynamic>> fetchInventoryLogs() async {
+    final response = await http.get(Uri.parse('${ApiConfig.baseUrl}/inventory/logs'));
+    if (response.statusCode == 200) return jsonDecode(response.body);
+    throw Exception('Failed to load inventory logs');
   }
 
   static Future<bool> deleteInventoryItem(int id) async {
     final response = await http.delete(Uri.parse('${ApiConfig.baseUrl}/inventory/$id'));
-    return response.statusCode == 200;
+    if (response.statusCode != 200) {
+      throw Exception(_extractError(response, 'Failed to delete inventory item'));
+    }
+    return true;
+  }
+
+  // --- DISH RECIPE LINKING ---
+  static Future fetchRecipe(int menuItemId) async {
+    final response = await http.get(Uri.parse('${ApiConfig.baseUrl}/menu/$menuItemId/recipe'));
+    if (response.statusCode == 200) return jsonDecode(response.body);
+    throw Exception('Failed to load dish recipe');
+  }
+
+  static Future<bool> addRecipeIngredient(int menuItemId, int inventoryItemId, double quantityRequired) async {
+    final response = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/menu/$menuItemId/recipe'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'inventory_item_id': inventoryItemId,
+        'quantity_required': quantityRequired,
+      }),
+    );
+    if (response.statusCode != 201 && response.statusCode != 200) {
+      throw Exception(_extractError(response, 'Failed to add recipe ingredient'));
+    }
+    return true;
+  }
+
+  static Future<bool> removeRecipeIngredient(int recipeId) async {
+    final response = await http.delete(Uri.parse('${ApiConfig.baseUrl}/recipe/$recipeId'));
+    if (response.statusCode != 200) {
+      throw Exception(_extractError(response, 'Failed to remove recipe ingredient'));
+    }
+    return true;
   }
 }

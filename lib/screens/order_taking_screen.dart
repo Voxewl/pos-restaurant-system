@@ -98,9 +98,42 @@ class _OrderTakingScreenState extends State<OrderTakingScreen> {
   }
 
   void _addItemToOrder(Map<String, dynamic> item, {String customNote = ''}) {
-    final int itemId = item['item_id'] ?? item['id'];
+    final bool isAvailable = item['is_available'] ?? true;
     final String itemName = item['item_name'] ?? item['name'];
+
+    if (!isAvailable) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$itemName is currently sold out.'),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+      return;
+    }
+
+    final int itemId = item['item_id'] ?? item['id'];
     final double price = double.parse(item['price'].toString());
+    final int? maxServings = item['max_servings'] is num
+        ? (item['max_servings'] as num).toInt()
+        : int.tryParse(item['max_servings']?.toString() ?? '');
+
+    // Count total units of this dish already in the cart (across all custom notes)
+    final int currentTotalInCart = _currentOrder
+        .where((element) => element.itemId == itemId)
+        .fold(0, (sum, element) => sum + element.quantity);
+
+    if (maxServings != null && currentTotalInCart >= maxServings) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Stock limit reached: only $maxServings $itemName available.'),
+          backgroundColor: Colors.orange.shade800,
+          duration: const Duration(milliseconds: 1500),
+        ),
+      );
+      return;
+    }
 
     setState(() {
       final existingIndex = _currentOrder.indexWhere(
@@ -158,14 +191,14 @@ class _OrderTakingScreenState extends State<OrderTakingScreen> {
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade800),
               onPressed: () {
-                setState(() {
-                  if (orderIndex != null) {
+                if (orderIndex != null) {
+                  setState(() {
                     _currentOrder[orderIndex].notes = controller.text;
-                  } else {
-                    item['draftNote'] = controller.text;
-                    _addItemToOrder(item, customNote: controller.text);
-                  }
-                });
+                  });
+                } else {
+                  item['draftNote'] = controller.text;
+                  _addItemToOrder(item, customNote: controller.text);
+                }
                 AppNavigation.pop(context);
               },
               child: const Text('Save Note', style: TextStyle(color: Colors.white)),
@@ -283,11 +316,13 @@ class _OrderTakingScreenState extends State<OrderTakingScreen> {
       );
     } catch (e) {
       if (mounted) {
-        showDialog(
+        final String cleanMessage = e.toString().replaceFirst('Exception: ', '');
+
+        await showDialog(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('Error Sending Order'),
-            content: Text('Failed to submit order: $e'),
+            title: const Text('Unable to Send Order', style: TextStyle(fontWeight: FontWeight.bold)),
+            content: Text(cleanMessage),
             actions: [
               TextButton(
                 onPressed: () => AppNavigation.pop(context),
@@ -296,6 +331,9 @@ class _OrderTakingScreenState extends State<OrderTakingScreen> {
             ],
           ),
         );
+
+        // Refresh menu availability so any newly sold-out items update immediately
+        _loadMenu();
       }
     } finally {
       if (mounted) setState(() => _isSubmitting = false);

@@ -58,8 +58,8 @@ class _DesktopAdminScreenState extends State<DesktopAdminScreen> {
                 label: Text('Menu & Categories'),
               ),
               NavigationRailDestination(
-                icon: Icon(Icons.restaurant_menu_outlined),
-                selectedIcon: Icon(Icons.restaurant_menu),
+                icon: Icon(Icons.inventory_2_outlined),
+                selectedIcon: Icon(Icons.inventory_2),
                 label: Text('Inventory'),
               ),
             ],

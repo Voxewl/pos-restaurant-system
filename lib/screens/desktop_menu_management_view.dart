@@ -30,6 +30,15 @@ class _DesktopMenuManagementViewState extends State<DesktopMenuManagementView> {
     _loadMenuData();
   }
 
+  @override
+  void dispose() {
+    _catNameCtrl.dispose();
+    _itemNameCtrl.dispose();
+    _itemPriceCtrl.dispose();
+    _itemIngredientsCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadMenuData() async {
     setState(() => _isLoading = true);
     try {
@@ -37,6 +46,7 @@ class _DesktopMenuManagementViewState extends State<DesktopMenuManagementView> {
       final printers = await ApiService.fetchPrinters();
       final menu = await ApiService.fetchMenu();
 
+      if (!mounted) return;
       setState(() {
         _categories = categories;
         _printers = printers;
@@ -44,6 +54,7 @@ class _DesktopMenuManagementViewState extends State<DesktopMenuManagementView> {
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => _isLoading = false);
       _showSnackBar('Error loading menu data: $e', isError: true);
     }
@@ -92,12 +103,11 @@ class _DesktopMenuManagementViewState extends State<DesktopMenuManagementView> {
     }
 
     try {
-      // Pass ingredients to the API service
       final success = await ApiService.createMenuItem(
-          name,
-          price,
-          _selectedCatForItem!,
-          description: ingredients // using description as ingredients mapping based on your api_service
+        name,
+        price,
+        _selectedCatForItem!,
+        description: ingredients,
       );
       if (success) {
         _itemNameCtrl.clear();
@@ -124,80 +134,17 @@ class _DesktopMenuManagementViewState extends State<DesktopMenuManagementView> {
     }
   }
 
-  // --- EDIT MENU ITEM DIALOG ---
+  // --- EDIT MENU ITEM & RECIPE BUILDER DIALOG ---
   void _showEditItemDialog(Map<String, dynamic> item) {
-    final nameCtrl = TextEditingController(text: item['item_name'] ?? item['name']);
-    final priceCtrl = TextEditingController(text: item['price'].toString());
-    final ingredientsCtrl = TextEditingController(text: item['ingredients'] ?? '');
-    int? selectedCategoryId = item['category_id'];
-
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Edit Menu Item'),
-        content: SizedBox(
-          width: 400,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Item Name', border: OutlineInputBorder()),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: priceCtrl,
-                decoration: const InputDecoration(labelText: 'Price (\$)', border: OutlineInputBorder()),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<int>(
-                value: selectedCategoryId,
-                decoration: const InputDecoration(labelText: 'Category', border: OutlineInputBorder()),
-                items: _categories.map((c) => DropdownMenuItem<int>(
-                  value: c['id'] ?? c['category_id'],
-                  child: Text(c['name'] ?? c['category_name']),
-                )).toList(),
-                onChanged: (val) => selectedCategoryId = val,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: ingredientsCtrl,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                    labelText: 'Ingredients / Recipe (e.g. 200g Beef, Cheddar, Bun)',
-                    border: OutlineInputBorder()
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade800, foregroundColor: Colors.white),
-            onPressed: () async {
-              if (nameCtrl.text.isEmpty || priceCtrl.text.isEmpty || selectedCategoryId == null) return;
-
-              try {
-                final int itemId = item['item_id'] ?? item['id'];
-                await ApiService.updateMenuItem(
-                  itemId,
-                  nameCtrl.text,
-                  double.parse(priceCtrl.text),
-                  selectedCategoryId!,
-                  ingredients: ingredientsCtrl.text,
-                );
-                if (mounted) Navigator.pop(ctx);
-                _loadMenuData(); // Refresh table to show new data
-                _showSnackBar('Item updated successfully!');
-              } catch (e) {
-                _showSnackBar('Error updating item: $e', isError: true);
-              }
-            },
-            child: const Text('Save Changes'),
-          ),
-        ],
+      builder: (ctx) => _EditMenuItemDialog(
+        item: item,
+        categories: _categories,
+        onSaved: () {
+          _loadMenuData();
+          _showSnackBar('Dish and recipe updated!');
+        },
       ),
     );
   }
@@ -307,7 +254,6 @@ class _DesktopMenuManagementViewState extends State<DesktopMenuManagementView> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  // New Ingredients Field on Create
                   TextField(
                     controller: _itemIngredientsCtrl,
                     decoration: const InputDecoration(labelText: 'Ingredients (Optional)', hintText: 'e.g. Bread, Garlic, Butter', border: OutlineInputBorder()),
@@ -375,7 +321,7 @@ class _DesktopMenuManagementViewState extends State<DesktopMenuManagementView> {
                 ],
                 rows: _menuItems.map((item) {
                   final int itemId = item['item_id'] ?? item['id'];
-                  final double price = double.parse((item['price'] ?? 0.0).toString());
+                  final double price = double.tryParse((item['price'] ?? 0.0).toString()) ?? 0.0;
                   return DataRow(cells: [
                     DataCell(Text('$itemId')),
                     DataCell(Text(item['item_name'] ?? item['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold))),
@@ -408,6 +354,297 @@ class _DesktopMenuManagementViewState extends State<DesktopMenuManagementView> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _EditMenuItemDialog extends StatefulWidget {
+  final Map<String, dynamic> item;
+  final List<dynamic> categories;
+  final VoidCallback onSaved;
+
+  const _EditMenuItemDialog({
+    required this.item,
+    required this.categories,
+    required this.onSaved,
+  });
+
+  @override
+  State<_EditMenuItemDialog> createState() => _EditMenuItemDialogState();
+}
+
+class _EditMenuItemDialogState extends State<_EditMenuItemDialog> {
+  late TextEditingController _nameCtrl;
+  late TextEditingController _priceCtrl;
+  late TextEditingController _notesCtrl;
+  int? _selectedCategoryId;
+
+  bool _loadingRecipe = true;
+  List<dynamic> _inventoryItems = [];
+  List<dynamic> _recipeItems = [];
+
+  int? _selectedInventoryId;
+  final TextEditingController _qtyCtrl = TextEditingController();
+
+  int get _menuItemId => widget.item['item_id'] ?? widget.item['id'];
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl = TextEditingController(text: widget.item['item_name'] ?? widget.item['name']);
+    _priceCtrl = TextEditingController(text: widget.item['price'].toString());
+    _notesCtrl = TextEditingController(text: widget.item['ingredients'] ?? '');
+    _selectedCategoryId = widget.item['category_id'];
+    _loadRecipeData();
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _priceCtrl.dispose();
+    _notesCtrl.dispose();
+    _qtyCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadRecipeData() async {
+    setState(() => _loadingRecipe = true);
+    try {
+      final inv = await ApiService.fetchInventory();
+      final rec = await ApiService.fetchRecipe(_menuItemId);
+      if (!mounted) return;
+      setState(() {
+        _inventoryItems = inv;
+        _recipeItems = rec;
+        _loadingRecipe = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loadingRecipe = false);
+    }
+  }
+
+  Future<void> _addIngredientToRecipe() async {
+    final qty = double.tryParse(_qtyCtrl.text.trim()) ?? 0.0;
+    if (_selectedInventoryId == null || qty <= 0) return;
+
+    try {
+      final ok = await ApiService.addRecipeIngredient(_menuItemId, _selectedInventoryId!, qty);
+      if (ok) {
+        _qtyCtrl.clear();
+        setState(() => _selectedInventoryId = null);
+        await _loadRecipeData();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error adding ingredient: $e')));
+      }
+    }
+  }
+
+  Future<void> _removeIngredient(int recipeId) async {
+    try {
+      final ok = await ApiService.removeRecipeIngredient(recipeId);
+      if (ok) {
+        await _loadRecipeData();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error removing ingredient: $e')));
+      }
+    }
+  }
+
+  Future<void> _saveDishDetails() async {
+    if (_nameCtrl.text.isEmpty || _priceCtrl.text.isEmpty || _selectedCategoryId == null) return;
+    try {
+      await ApiService.updateMenuItem(
+        _menuItemId,
+        _nameCtrl.text.trim(),
+        double.parse(_priceCtrl.text.trim()),
+        _selectedCategoryId!,
+        ingredients: _notesCtrl.text.trim(),
+      );
+      if (mounted) Navigator.pop(context);
+      widget.onSaved();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error saving dish: $e')));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Edit Dish & Recipe: ${widget.item['item_name'] ?? widget.item['name']}'),
+      content: SizedBox(
+        width: 560,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // DISH DETAILS
+              Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: TextField(
+                      controller: _nameCtrl,
+                      decoration: const InputDecoration(labelText: 'Item Name', border: OutlineInputBorder()),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      controller: _priceCtrl,
+                      decoration: const InputDecoration(labelText: 'Price (\$)', border: OutlineInputBorder()),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<int>(
+                      value: _selectedCategoryId,
+                      decoration: const InputDecoration(labelText: 'Category', border: OutlineInputBorder()),
+                      items: widget.categories.map<DropdownMenuItem<int>>((c) {
+                        return DropdownMenuItem<int>(
+                          value: c['id'] ?? c['category_id'],
+                          child: Text(c['name'] ?? c['category_name']),
+                        );
+                      }).toList(),
+                      onChanged: (val) => setState(() => _selectedCategoryId = val),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      controller: _notesCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Kitchen Prep Note (Optional)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              const Divider(height: 28),
+
+              // RECIPE BUILDER SECTION
+              const Text(
+                'Inventory Recipe (Auto-Deducted on Order)',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: DropdownButtonFormField<int>(
+                      value: _selectedInventoryId,
+                      decoration: const InputDecoration(
+                        labelText: 'Select Inventory Ingredient',
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      ),
+                      items: _inventoryItems.map<DropdownMenuItem<int>>((inv) {
+                        return DropdownMenuItem<int>(
+                          value: inv['id'],
+                          child: Text('${inv['name']} (${inv['abbreviation']})'),
+                        );
+                      }).toList(),
+                      onChanged: (val) => setState(() => _selectedInventoryId = val),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    flex: 2,
+                    child: TextField(
+                      controller: _qtyCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(
+                        labelText: 'Qty Used',
+                        hintText: 'e.g. 200',
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green.shade700,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                    ),
+                    onPressed: _addIngredientToRecipe,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // LINKED INGREDIENTS LIST
+              Container(
+                height: 170,
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: _loadingRecipe
+                    ? const Center(child: CircularProgressIndicator())
+                    : _recipeItems.isEmpty
+                    ? Center(
+                  child: Text(
+                    'No inventory ingredients linked yet.',
+                    style: TextStyle(color: Colors.grey.shade600),
+                  ),
+                )
+                    : ListView.separated(
+                  itemCount: _recipeItems.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (ctx, i) {
+                    final r = _recipeItems[i];
+                    return ListTile(
+                      dense: true,
+                      title: Text(r['ingredient_name'], style: const TextStyle(fontWeight: FontWeight.w600)),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '${r['quantity_required']} ${r['abbreviation']}',
+                            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                            onPressed: () => _removeIngredient(r['id']),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade800, foregroundColor: Colors.white),
+          onPressed: _saveDishDetails,
+          child: const Text('Save Dish Info'),
+        ),
+      ],
     );
   }
 }
